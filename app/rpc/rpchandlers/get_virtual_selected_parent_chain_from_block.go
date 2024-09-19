@@ -26,6 +26,11 @@ func HandleGetVirtualSelectedParentChainFromBlock(context *rpccontext.Context, _
 		return response, nil
 	}
 
+	if uint64(len(virtualSelectedParentChain.Added)) > 3600 {
+		// Send at most an hour worth of added chain blocks
+		virtualSelectedParentChain.Added = virtualSelectedParentChain.Added[:3600]
+	}
+
 	chainChangedNotification, err := context.ConvertVirtualSelectedParentChainChangesToChainChangedNotificationMessage(
 		virtualSelectedParentChain, getVirtualSelectedParentChainFromBlockRequest.IncludeAcceptedTransactionIDs)
 	if err != nil {
