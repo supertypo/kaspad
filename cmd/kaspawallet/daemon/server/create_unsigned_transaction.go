@@ -166,6 +166,16 @@ func (s *server) selectUTXOsWithPreselected(preSelectedUTXOs []*walletUTXO, allo
 		return nil, 0, 0, err
 	}
 
+	// Pre-compute the marginal fee cost of one input once (O(1)), so the selection
+	// loop can use an O(1) approximation instead of rebuilding a full mock
+	// transaction on every iteration (which was O(N²) for N UTXOs).
+	// The final, accurate fee is computed with a single estimateFee call after
+	// the loop completes.
+	feePerInput, err := s.estimateFeePerInput(feeRate)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
 	var fee uint64
 	iteration := func(utxo *walletUTXO, avoidPreselected bool) (bool, error) {
 		if (fromAddresses != nil && !walletAddressesContain(fromAddresses, utxo.address)) ||
@@ -196,14 +206,19 @@ func (s *server) selectUTXOsWithPreselected(preSelectedUTXOs []*walletUTXO, allo
 		})
 
 		totalValue += utxo.UTXOEntry.Amount()
-		estimatedRecipientValue := spendAmount
-		if isSendAll {
-			estimatedRecipientValue = totalValue
-		}
 
-		fee, err = s.estimateFee(selectedUTXOs, feeRate, maxFee, estimatedRecipientValue)
-		if err != nil {
-			return false, err
+		// O(1) fee approximation: N * feePerInput.
+		// This slightly underestimates the true fee by the fixed base-transaction
+		// compute mass overhead (a few thousand sompi at typical fee rates). The
+		// minChangeTarget cushion in case 2 is 10 KAS (~10^10 sompi), which
+		// dwarfs that error, so the break condition remains safe.
+		// Storage mass is intentionally ignored here (matching estimateFeePerInput's
+		// own assumption): with many inputs storage mass trends to zero because the
+		// arithmetic mean of inputs grows beyond the harmonic sum of outputs.
+		// The one accurate estimateFee call after the loop corrects all amounts.
+		fee = uint64(len(selectedUTXOs)) * feePerInput
+		if fee > maxFee {
+			fee = maxFee
 		}
 
 		totalSpend := spendAmount + fee
@@ -242,6 +257,16 @@ func (s *server) selectUTXOsWithPreselected(preSelectedUTXOs []*walletUTXO, allo
 				break
 			}
 		}
+	}
+
+	// Compute the accurate fee once on the final UTXO selection.
+	estimatedRecipientValue := spendAmount
+	if isSendAll {
+		estimatedRecipientValue = totalValue
+	}
+	fee, err = s.estimateFee(selectedUTXOs, feeRate, maxFee, estimatedRecipientValue)
+	if err != nil {
+		return nil, 0, 0, err
 	}
 
 	var totalSpend uint64
