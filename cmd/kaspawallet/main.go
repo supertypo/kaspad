@@ -34,6 +34,8 @@ func main() {
 		err = startDaemon(config.(*startDaemonConfig))
 	case sweepSubCmd:
 		err = sweep(config.(*sweepConfig))
+	case compoundSubCmd:
+		err = compound(config.(*compoundConfig))
 	case versionSubCmd:
 		showVersion()
 	case getDaemonVersionSubCmd:

@@ -27,6 +27,7 @@ const (
 	bumpFeeSubCmd                   = "bump-fee"
 	bumpFeeUnsignedSubCmd           = "bump-fee-unsigned"
 	broadcastReplacementSubCmd      = "broadcast-replacement"
+	compoundSubCmd                  = "compound"
 )
 
 const (
@@ -76,6 +77,18 @@ type sendConfig struct {
 type sweepConfig struct {
 	PrivateKey    string `long:"private-key" short:"k" description:"Private key in hex format"`
 	DaemonAddress string `long:"daemonaddress" short:"d" description:"Wallet daemon server to connect to"`
+	config.NetworkFlags
+}
+
+type compoundConfig struct {
+	KeysFile          string  `long:"keys-file" short:"f" description:"Keys file location (default: ~/.kaspawallet/keys.json (*nix), %USERPROFILE%\\AppData\\Local\\Kaspawallet\\key.json (Windows))"`
+	Password          string  `long:"password" short:"p" description:"Wallet password"`
+	DaemonAddress     string  `long:"daemonaddress" short:"d" description:"Wallet daemon server to connect to"`
+	UsePrimaryAddress bool    `long:"use-primary-address" description:"Send to the first (primary) address instead of a newly generated address"`
+	MaxFeeRate        float64 `long:"max-fee-rate" short:"m" description:"Maximum fee rate in Sompi/gram. The wallet will take the minimum between the node's estimate and this value."`
+	FeeRate           float64 `long:"fee-rate" short:"r" description:"Exact fee rate in Sompi/gram. Overrides the node's fee estimate."`
+	MaxFee            uint64  `long:"max-fee" short:"x" description:"Maximum total fee in Sompi. The wallet will take the minimum between the node's estimate and this value."`
+	Verbose           bool    `long:"show-serialized" short:"s" description:"Print hex-encoded signed transactions after broadcast"`
 	config.NetworkFlags
 }
 
@@ -239,6 +252,10 @@ func parseCommandLine() (subCommand string, config interface{}) {
 	parser.AddCommand(bumpFeeUnsignedSubCmd, "Bump transaction fee (without signing)", "Bump transaction fee (without signing)", bumpFeeUnsignedConf)
 	parser.AddCommand(broadcastReplacementSubCmd, "Broadcast the given transaction replacement",
 		"Broadcast the given transaction replacement", broadcastConf)
+	compoundConf := &compoundConfig{DaemonAddress: defaultListen}
+	parser.AddCommand(compoundSubCmd, "Consolidate all UTXOs into one",
+		"Sends all wallet funds to the primary (first) address, or a fresh address if --use-primary-address is not set, "+
+			"merging all UTXOs into a single output using the wallet's compound transaction logic.", compoundConf)
 
 	_, err := parser.Parse()
 	if err != nil {
@@ -380,6 +397,13 @@ func parseCommandLine() (subCommand string, config interface{}) {
 		}
 
 		config = bumpFeeUnsignedConf
+	case compoundSubCmd:
+		combineNetworkFlags(&compoundConf.NetworkFlags, &cfg.NetworkFlags)
+		err := compoundConf.ResolveNetwork(parser)
+		if err != nil {
+			printErrorAndExit(err)
+		}
+		config = compoundConf
 	}
 
 	return parser.Command.Active.Name, config
